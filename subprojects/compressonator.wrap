@@ -1,9 +1,0 @@
-[wrap-git]
-url = https://github.com/GPUOpen-Tools/compressonator.git
-revision = 32269b4dca207b8573b2d6534111223af8f1b2b6
-depth = 1
-patch_directory = compressonator
-diff_files = diffs/compressonator-0001.patch
-
-[provide]
-cmp_compressonator = cmp_compressonator_dep

@@ -1,5 +1,5 @@
 project('rivet', 'cpp',
-	license: 'MPL-2.0',
+	license: 'EUPL-1.2',
 	version: '0.0.6',
 	default_options: [
 		'prefix=/usr',
@@ -9,33 +9,6 @@ project('rivet', 'cpp',
     meson_version: '>=1.2.1')
 
 compiler = meson.get_compiler('cpp')
-
-if get_option('buildtype') == 'custom'
-    opt_args = compiler.get_supported_arguments(
-        '-march=knl',
-        '-mtune=knl',
-        '-fopenmp',
-	'-mllvm=-polly',
-	'-mllvm=-polly-vectorizer=stripmine',
-	'-mllvm=-polly-parallel',
-	'-mllvm=-polly-omp-backend=LLVM',
-	'-mllvm=-polly-num-threads=24',
-	'-mllvm=-polly-scheduling=dynamic',
-	'-mllvm=-polly-scheduling-chunksize=1'
-    )
-
-    if compiler.get_id() == 'clang'
-        add_project_arguments('-Ofast', language: 'cpp')
-    else
-        if compiler.get_id() == 'msvc'
-            opt_args += ['/Ox']
-        else
-            opt_args += ['-O2']
-        endif
-    endif
-
-    add_global_arguments(opt_args, language: 'cpp')
-endif
 
 cpp_args = []
 
@@ -54,94 +27,43 @@ cpp_args = compiler.get_supported_arguments(
     '-Wall',
     '-Wextra',
     '-pedantic',
-    '-Werror',
     '-Wno-unused-variable',
     '-Wno-unused-parameter',
 )
 
 add_project_arguments(cpp_args, language: 'cpp')
 
-# cross dependencies between cli and rivet
 nlohmann_json_dep = dependency('', required: false)
 if not compiler.check_header('nlohmann/json.hpp')
     nlohmann_json_dep = dependency('nlohmann_json', version: '>=3.11.2')
 endif
 
-subdir('rivet_hook')
+if host_machine.system() != 'windows'
 
-subdir('extern')
-
-cmake = import('cmake')
-
-if not get_option('rivet_hook_only')
-# public dependencies
-deps = []
-if not compiler.check_header('ankerl/unordered_dense.h')
-    deps += [dependency('unordered_dense', version: '>=4.1.1')]
 endif
 
-# cli dependencies
-cli_deps = [] + deps
-if not get_option('rivet_no_cli') or not get_option('rivet_no_gui')
-    if not compiler.check_header('clipp.h')
-        cli_deps += [dependency('clipp', version: '>=1.2.4')]
-    endif
-    cli_deps += [nlohmann_json_dep]
+minhook_dep = dependency('minhook', version: '>= 1.3.3')
+
+ext = 'asm'
+asm_compiler = 'nasm'
+if build_machine.system() == 'windows'
+    ext = 'masm'
+    asm_compiler = 'masm'
 endif
 
-# gui dependencies
-gui_deps = [] + cli_deps
-if not get_option('rivet_no_gui')
-    sdl3_dep = dependency('sdl3', version: '>=3.0.0', required: false)
-    if not sdl3_dep.found()
-        sdl3_subproj = cmake.subproject('sdl3')
-        sdl3_dep = sdl3_subproj.dependency('SDL3-shared')
-        meson.override_dependency('sdl3', sdl3_dep)
-    endif
-    gui_deps += [sdl3_dep]
+if not add_languages(asm_compiler, native: false, required: true)
+    error(asm_compiler + ' not available')
 endif
 
-# rivet dependencies
-rivet_deps = [] + deps
-rivet_deps += [nlohmann_json_dep]
-if not compiler.check_header('fx/gltf.h')
-    rivet_deps += [dependency('fx-gltf', version: '>=2.0.0')]
-endif
-rivet_deps += [dependency('liblz4', version: '>=1.9.4')]
-rivet_deps += [dependency('libgdeflate', version: '>=1.8.0')]
-rivet_deps += [dependency('zlib', version: '>=1.3')]
-if not compiler.check_header('compressonator.h')
-    rivet_deps += [dependency('cmp_compressonator', version: '>=4.4.19', static: true)]
-endif
-rivet_deps += [dependency('libtiff-4')]
-rivet_deps += [dependency('libpng', version: '>=1.6.40')]
-
-gdeflate_core = subproject('GDeflate')
-rivet_deps += [gdeflate_core.get_variable('gdeflate_core_dep')]
-
-libdeps = []
-
-icon_sources = []
-if host_machine.system() == 'windows'
-    if import('fs').is_file('resources/icon.ico')
-        icon_sources += import('windows').compile_resources(
-            'resources/rivet.rc',
-            include_directories : [meson.current_build_dir(), 'resources'],
-        )
-    endif
-endif
-
-subdir('src')
-
-subdir('ddl')
-
-if not get_option('rivet_lib_only')
-    subdir('cli')
-endif
-
-if get_option('rivet_tests')
-    subdir('test')
-endif
-
-install_subdir('include/', install_dir: 'include/', strip_directory: true)
-endif
+rivet_hook = shared_library('rivet_hook', [
+        'dll_main.cpp',
+        'trampoline.' + ext,
+        'runtime/runtime.cpp'
+    ],
+    link_args: meson.get_compiler('cpp').get_supported_arguments('-static-libgcc', '-static-libstdc++'),
+    dependencies: [
+        nlohmann_json_dep,
+        minhook_dep,
+    ],
+    vs_module_defs: 'hid.def'
+)
